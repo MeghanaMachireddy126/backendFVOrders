@@ -11,7 +11,7 @@ app.use(express.json());
 
 // PostgreSQL pool setup
 const pool = new Pool({
-  connectionString: 'postgresql://FVorder_owner:npg_l5jBai9CGFVL@ep-jolly-shadow-a4glnxdr-pooler.us-east-1.aws.neon.tech/FVorder?sslmode=require',
+  connectionString: 'postgresql://FVorders_owner:npg_JYz5vftUSkl9@ep-holy-sun-a4rpbu9p-pooler.us-east-1.aws.neon.tech/FVorders?sslmode=require&channel_binding=require',
 });
 
 // Root route
