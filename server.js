@@ -18,6 +18,25 @@ const pool = new Pool({
 app.get("/", (req, res) => {
   res.send("Backend is working!");
 });
+// Get all order items
+app.get('/api/order_items', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT 
+        order_items.id,
+        order_items.order_id,
+        order_items.product_id,
+        products.name AS product_name,
+        order_items.quantity
+      FROM order_items
+      JOIN products ON order_items.product_id = products.id
+      ORDER BY order_items.order_id DESC;
+    `);
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // Get all products
 app.get('/api/products', async (req, res) => {
