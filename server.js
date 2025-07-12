@@ -1,7 +1,6 @@
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
-const jwt = require('jsonwebtoken');
 require('dotenv').config();
 
 const app = express();
@@ -15,40 +14,10 @@ const pool = new Pool({
   connectionString: 'postgresql://FVorders_owner:npg_JYz5vftUSkl9@ep-holy-sun-a4rpbu9p-pooler.us-east-1.aws.neon.tech/FVorders?sslmode=require&channel_binding=require',
 });
 
-// Middleware to authenticate admin using JWT
-function authenticateToken(req, res, next) {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
-  if (!token) return res.status(401).json({ error: 'No token provided' });
-
-  jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
-    if (err) return res.status(403).json({ error: 'Invalid token' });
-    req.user = user;
-    next();
-  });
-}
-
 // Root route
 app.get("/", (req, res) => {
   res.send("Backend is working!");
 });
-
-// ==================== Admin Login ====================
-app.post('/api/admin/login', (req, res) => {
-  const { email, password } = req.body;
-
-  if (
-    email === process.env.ADMIN_EMAIL &&
-    password === process.env.ADMIN_PASSWORD
-  ) {
-    const token = jwt.sign({ email }, process.env.JWT_SECRET, { expiresIn: '2h' });
-    res.json({ token });
-  } else {
-    res.status(401).json({ error: 'Invalid credentials' });
-  }
-});
-
-// ==================== Product APIs ====================
 
 // Get all products
 app.get('/api/products', async (req, res) => {
@@ -60,8 +29,8 @@ app.get('/api/products', async (req, res) => {
   }
 });
 
-// Add a new product (Admin only)
-app.post('/api/products', authenticateToken, async (req, res) => {
+// Add a new product (Admin)
+app.post('/api/products', async (req, res) => {
   const { name, price } = req.body;
   try {
     const result = await pool.query(
@@ -74,8 +43,8 @@ app.post('/api/products', authenticateToken, async (req, res) => {
   }
 });
 
-// Update product (Admin only)
-app.put('/api/products/:id', authenticateToken, async (req, res) => {
+// Update product (Admin)
+app.put('/api/products/:id', async (req, res) => {
   const { id } = req.params;
   const { name, price } = req.body;
   try {
@@ -89,8 +58,8 @@ app.put('/api/products/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// Delete product (Admin only)
-app.delete('/api/products/:id', authenticateToken, async (req, res) => {
+//Delete product (Admin)
+app.delete('/api/products/:id', async (req, res) => {
   const { id } = req.params;
   try {
     await pool.query('DELETE FROM products WHERE id=$1', [id]);
@@ -100,12 +69,12 @@ app.delete('/api/products/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// ==================== Orders ====================
-
-// Place Order
+// Place Order with validation
 app.post('/api/orders', async (req, res) => {
   const { name, address, contact, items } = req.body;
   try {
+    console.log("📦 Incoming Order:", { name, address, contact, items });
+
     const orderResult = await pool.query(
       'INSERT INTO orders (name, address, contact, status) VALUES ($1, $2, $3, $4) RETURNING id',
       [name, address, contact, 'Pending']
@@ -113,12 +82,15 @@ app.post('/api/orders', async (req, res) => {
     const orderId = orderResult.rows[0].id;
 
     for (const item of items) {
+      console.log("🔍 Checking Product ID:", item.product_id);
+
       const productCheck = await pool.query(
         'SELECT id FROM products WHERE id = $1',
         [item.product_id]
       );
 
       if (productCheck.rowCount === 0) {
+        console.error(`❌ Product not found for ID: ${item.product_id}`);
         return res.status(400).json({
           error: `Product with id ${item.product_id} does not exist`,
         });
@@ -132,26 +104,36 @@ app.post('/api/orders', async (req, res) => {
 
     res.status(201).json({ id: orderId, status: 'Pending' });
   } catch (err) {
+    console.error("❌ Order submission failed:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// Track single order by ID
+// Track Order by ID
 app.get('/api/orders/:id', async (req, res) => {
-  const orderId = parseInt(req.params.id, 10);
+  const rawId = req.params.id;
+  const orderId = parseInt(rawId, 10);
+
+  console.log("Incoming request for Order ID:", orderId);
+
   try {
     const orderResult = await pool.query('SELECT * FROM orders WHERE id = $1', [orderId]);
+    console.log("Query Result:", orderResult.rows);
+
     if (orderResult.rows.length === 0) {
+      console.log("⚠️ No order found in DB");
       return res.status(404).json({ error: 'Order not found' });
     }
+
     res.json(orderResult.rows[0]);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error("❌ Error querying the database:", err);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// Get all orders (Admin only)
-app.get('/api/orders', authenticateToken, async (req, res) => {
+//Admin: Get All Orders
+app.get('/api/orders', async (req, res) => {
   try {
     const result = await pool.query('SELECT * FROM orders ORDER BY id DESC');
     res.json(result.rows);
@@ -160,8 +142,8 @@ app.get('/api/orders', authenticateToken, async (req, res) => {
   }
 });
 
-// Update order status (Admin only)
-app.put('/api/orders/:id/status', authenticateToken, async (req, res) => {
+//Admin: Update Order Status
+app.put('/api/orders/:id/status', async (req, res) => {
   const { id } = req.params;
   const { status } = req.body;
   try {
@@ -170,26 +152,6 @@ app.put('/api/orders/:id/status', authenticateToken, async (req, res) => {
       [status, id]
     );
     res.json(result.rows[0]);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Get order items by order ID (optional)
-app.get('/api/orders/:id/items', async (req, res) => {
-  const { id } = req.params;
-  try {
-    const result = await pool.query(`
-      SELECT 
-        order_items.id,
-        order_items.product_id,
-        products.name AS product_name,
-        order_items.quantity
-      FROM order_items
-      JOIN products ON order_items.product_id = products.id
-      WHERE order_items.order_id = $1
-    `, [id]);
-    res.json(result.rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
